@@ -9,33 +9,41 @@
 - [Nitro](https://nitro.build/)：[UnJS](https://unjs.io/) 家族的 Web 服务器，基于文件路由，支持定时任务
 - [Mongoose](https://mongoosejs.com/)：MongoDB 的 ODM，用于操作数据库
 - [Fast XML Parser](https://naturalintelligence.github.io/fast-xml-parser/#readme)：用于解析 Atom/RSS
-- [env-cmd](https://github.com/toddbluhm/env-cmd#readme)：用于在生产环境加载 `.env` 变量
 
 环境：
 
 - [Node.js](https://nodejs.org/)：JavaScript 运行时
 - [MongoDB](https://www.mongodb.com/)：数据库
+- [Docker](https://www.docker.com/)：容器化部署
 - [PM2](https://pm2.keymetrics.io/)：进程管理器
 
 ## 项目结构
 
 ```sh
 blog-feed
-├── .env                    # 环境变量
+├── .env.example             # 环境变量模板
+├── Dockerfile               # Docker 构建文件
+├── docker-compose.yml       # Docker 编排
 ├── eslint.config.mjs       # ESLint 配置
-├── nitro.config.mjs        # Nitro 配置
-├── models                  # 数据模型
-│   └── article.ts              # 文章模型
-├── route                   # 基于文件的路由
-│   ├── index.get.ts            # 状态 API
-│   ├── article.get.ts          # 文章 API
-│   └── manual-update.post.ts   # 手动更新 API
-├── tasks                   # 定时任务
-│   └── update.ts               # 爬取文章并更新数据库
-└── utils                   # 工具函数
-    ├── crawl.ts                # Feed 爬取
-    ├── db.ts                   # 数据库操作
-    └── feed.ts                 # Feed 处理
+├── nitro.config.ts          # Nitro 配置
+├── data                     # 静态数据
+│   └── ghproxy.json             # GitHub 加速代理列表
+├── models                   # 数据模型
+│   └── article.ts               # 文章模型
+├── plugins                  # Nitro 插件
+│   └── init.ts                  # 启动时触发首次爬取
+├── routes                   # 基于文件的路由
+│   ├── index.get.ts             # 状态 API
+│   ├── articles.get.ts          # 文章 API
+│   ├── opml.get.ts              # OPML 导出
+│   ├── rss.get.ts               # RSS 导出
+│   └── [...].ts                 # CORS 预检
+├── tasks                    # 定时任务
+│   └── update.ts                # 爬取文章并更新数据库
+└── utils                    # 工具函数
+    ├── crawl.ts                 # Feed 爬取
+    ├── db.ts                    # 数据库操作
+    └── feed.ts                  # Feed 解析
 ```
 
 ## 项目配置
@@ -59,6 +67,70 @@ export default defineNitroConfig({
         feedKey: 'feed', // 订阅源地址字段
     },
 })
+```
+
+## Docker Compose 部署
+
+无需手动安装 Node.js、MongoDB、Nginx，一键启动全部服务。
+
+```bash
+# 1. 从模板创建环境变量
+cp .env.example .env
+vim .env   # 设置密码
+
+# 2. 启动（Nginx 初始为 HTTP 模式）
+docker compose up -d --build
+
+# 3. 首次申请 SSL 证书（只需一次，之后自动续期）
+# 申请前确认域名已解析到本机公网 IP，且云安全组/防火墙已开放 80 / 443
+bash nginx/init-ssl.sh
+
+# 4. 验证
+curl https://api.xiyoulinux.com/
+```
+
+### 服务架构
+
+| 容器 | 端口 | 说明 |
+|------|------|------|
+| `nginx` | 80, 443 | 反代 + SSL，证书由 certbot 管理 |
+| `app` | 3000 (内网) | Nitro 后端 API |
+| `mongo` | 27017 (本地) | MongoDB 数据库 |
+| `certbot` | - | 每 12 小时检查证书续期 |
+
+### 防火墙
+
+只需在云服务器安全组开放 **80 / 443**。数据库和应用端口均不暴露公网。
+
+### SSL 证书
+
+默认域名为 `api.xiyoulinux.com`，默认邮箱为 `root@xiyoulinux.org`。如需更换，可在执行脚本时指定：
+
+```bash
+CERTBOT_DOMAIN=example.com CERTBOT_EMAIL=admin@example.com bash nginx/init-ssl.sh
+```
+
+申请证书时使用 HTTP Webroot 校验，必须确保公网可以访问：
+
+```bash
+curl http://api.xiyoulinux.com/
+```
+
+### 更新部署
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### 常用命令
+
+```bash
+docker compose logs -f app         # 查看应用日志
+docker compose logs -f nginx       # 查看 Nginx 日志
+docker compose restart app         # 重启应用
+docker compose down                # 停止全部
+docker compose exec mongo mongosh -u root -p  # 进入数据库
 ```
 
 ## 项目运行
